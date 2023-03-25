@@ -1,17 +1,24 @@
-import pickle
-import pandas as pd
-import numpy as np
-from flask import Flask, request, jsonify
-from urllib.parse import urlparse
 import re
+import numpy as np
+import pandas as pd
+import joblib
+from fastapi import FastAPI
+from pydantic import BaseModel
+from urllib.parse import urlparse
 from googlesearch import search
 from tld import get_tld
 
-# Load the pre-trained machine learning model
-model = pickle.load(open('model.pkl', 'rb'))
+# Define the input data model
+class URL(BaseModel):
+    url: str
 
-# Define the Flask app
-app = Flask(__name__)
+# Define the output data model
+class Prediction(BaseModel):
+    url: str
+    prediction: str
+
+# Load the machine learning model
+clf = joblib.load('model.pkl')
 
 def having_ip_address(url):
     match = re.search(
@@ -134,12 +141,8 @@ def tld_length(tld):
         return len(tld)
     except:
         return -1
-
-# Define a function to preprocess the URL
-def preprocess_url(url):
-    return url
-
-def main(url):
+    
+def preprocess(url):
     
     status = []
     
@@ -172,44 +175,31 @@ def main(url):
     
     return status
 
-def get_prediction_from_url(test_url):
-    features_test = main(test_url)
+# Create the FastAPI app
+app = FastAPI()
 
-    # Due to updates to scikit-learn, we now need a 2D array as a parameter to the predict function.
-    features_test = np.array(features_test).reshape((1, -1))
+# Define the prediction route
+@app.post("/predict", response_model=Prediction)
+async def predict(url: URL):
+    # Preprocess the URL
+    url_array = preprocess(url.url)
+    # Make the prediction
+    prediction = clf.predict([url_array])[0]
 
-    
-
-    pred = model.predict(features_test)
-    if int(pred[0]) == 0:
-        
+    if int(prediction) == 0:    
         res="SAFE"
-        return res
-    elif int(pred[0]) == 1.0:
         
+    elif int(prediction) == 1.0:   
         res="DEFACEMENT"
-        return res
-    elif int(pred[0]) == 2.0:
+        
+    elif int(prediction) == 2.0:
         res="PHISHING"
-        return res
-        
-    elif int(pred[0]) == 3.0:
-        
+             
+    elif int(prediction) == 3.0:
         res="MALWARE"
-        return res
+        
     
-
-
-# Define the API endpoint
-@app.route('/predict', methods=['POST'])
-def predict():
-    # Get the URL from the request
-    url = request.json['url']
-
-    prediction = get_prediction_from_url(url)
-    # Return the prediction as a JSON object
-    return jsonify({'prediction': prediction})
-
-# Run the Flask app
-if __name__ == '__main__':
-    app.run(debug=True)
+    return Prediction(
+        url=url.url,
+        prediction=res
+    )
